@@ -1,84 +1,75 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+  // IMPORTANT: In Edge middleware on Vercel, request.cookies is read-only.
+  // You must only set cookies on the NextResponse.
   let response = NextResponse.next({
     request: {
       headers: request.headers,
     },
   })
 
-  const redirectWithCookies = (url: URL) => {
-    const redirectResponse = NextResponse.redirect(url)
+  const url = request.nextUrl
+  const isAdminRoute = url.pathname.startsWith('/admin')
+  const isLoginRoute = url.pathname === '/admin/login' || url.pathname === '/admin/login/'
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return response
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll()
+      },
+      setAll(cookiesToSet) {
+        // Re-create the response so Next can properly forward headers/cookies
+        response = NextResponse.next({
+          request: {
+            headers: request.headers,
+          },
+        })
+
+        for (const cookie of cookiesToSet) {
+          response.cookies.set(cookie)
+        }
+      },
+    },
+  })
+
+  // Wrap auth calls to avoid throwing (would surface as MIDDLEWARE_INVOCATION_FAILED)
+  let hasSession = false
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    hasSession = !!session
+  } catch {
+    // If Supabase fails for some reason, do not block site access.
+    return response
+  }
+
+  const redirectTo = (pathname: string) => {
+    const redirectUrl = new URL(pathname, request.url)
+    const redirectResponse = NextResponse.redirect(redirectUrl)
+
+    // Copy any cookies that were set during this middleware run
     for (const cookie of response.cookies.getAll()) {
       redirectResponse.cookies.set(cookie)
     }
     return redirectResponse
   }
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({
-            name,
-            value,
-            ...options,
-          })
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
-          response.cookies.set({
-            name,
-            value,
-            ...options,
-          })
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({
-            name,
-            value: '',
-            ...options,
-          })
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
-          response.cookies.set({
-            name,
-            value: '',
-            ...options,
-          })
-        },
-      },
-    }
-  )
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
-  const isLoginRoute = request.nextUrl.pathname === '/admin/login' || request.nextUrl.pathname === '/admin/login/';
-
-  // Redirect to login if not authenticated and trying to access admin routes
-  if (!session && isAdminRoute) { // Simplified check
-    if (!isLoginRoute) {
-      return redirectWithCookies(new URL('/admin/login', request.url));
-    }
+  if (isAdminRoute && !hasSession && !isLoginRoute) {
+    return redirectTo('/admin/login')
   }
 
-  // If authenticated and trying to access login page, redirect to dashboard
-  if (session && isLoginRoute) {
-    return redirectWithCookies(new URL('/admin/dashboard', request.url));
+  if (isLoginRoute && hasSession) {
+    return redirectTo('/admin/dashboard')
   }
 
   return response
@@ -91,7 +82,8 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - api
      */
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api).*)',
   ],
 }
