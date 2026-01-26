@@ -24,7 +24,7 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isLoginPage = pathname === '/admin/login';
+  const isLoginPage = pathname === '/admin/login' || pathname === '/admin/login/';
 
   const menuItems = [
     {
@@ -66,7 +66,9 @@ export default function AdminLayout({
 
   return (
     isLoginPage ? (
-      <div>{children}</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-neutral-50 to-white">
+        {children}
+      </div>
     ) : (
       <div className="grid min-h-screen w-full md:grid-cols-[240px_1fr] lg:grid-cols-[280px_1fr]">
         <div className="hidden border-r bg-gradient-to-b from-white to-neutral-50/50 md:block shadow-sm">
