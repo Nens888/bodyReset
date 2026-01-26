@@ -40,11 +40,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // This endpoint might be for clearing earnings data or resetting some state
-    // Since we don't have the original implementation, we'll return a success response
-    // In a real implementation, this would likely update records in the database
+    // Получаем год и месяц из тела запроса
+    const body = await request.json();
+    const { year, month } = body;
+
+    if (!year || !month) {
+      return NextResponse.json({ error: 'Year and month are required' }, { status: 400 });
+    }
+
+    // Форматируем месяц в формат YYYY-MM для поиска в created_at
+    const monthString = `${year}-${month.toString().padStart(2, '0')}`;
+
+    // Очищаем заработок за выбранный месяц - удаляем или обнуляем bookings за месяц
+    // Вариант 1: удаляем bookings за месяц
+    const startDate = `${monthString}-01T00:00:00.000Z`;
+    const endDate = `${monthString}-31T23:59:59.999Z`;
     
-    return NextResponse.json({ message: 'Earnings cleared successfully' }, { status: 200 });
+    const { data, error } = await supabase
+      .from('bookings')
+      .delete()
+      .gte('created_at', startDate)
+      .lte('created_at', endDate)
+      .select();
+
+    if (error) {
+      console.error('Supabase error clearing earnings:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ 
+      message: 'Earnings cleared successfully',
+      clearedBookings: data?.length || 0
+    }, { status: 200 });
   } catch (err: any) {
     console.error('Unhandled error in POST /api/earnings/clear:', err);
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
